@@ -894,6 +894,7 @@ func madeYouResetAttack(parentCtx context.Context, config *workerConfig, client 
 func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utls.ClientHelloID) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		var conn net.Conn
+		var err error
 
 		if len(proxyList) > 0 {
 			pAddr := proxyList[mathrand.Intn(len(proxyList))]
@@ -923,7 +924,6 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 					return nil, err
 				}
 
-				// หากเป็น HTTPS Proxy ให้หุ้มการเชื่อมต่อด้วย TLS ก่อนส่ง CONNECT
 				if pURL.Scheme == "https" {
 					tlsConn := tls.Client(conn, &tls.Config{
 						ServerName:         pURL.Hostname(),
@@ -936,39 +936,31 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 					conn = tlsConn
 				}
 
-				// ส่งคำสั่ง CONNECT (ใช้ได้กับทั้ง HTTP และ HTTPS Tunnel)
+				// ส่ง CONNECT
 				fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", addr, addr)
 
+				// --- [จุดสำคัญที่แก้] เช็คคำตอบจาก Proxy ก่อนทำ uTLS ---
 				br := bufio.NewReader(conn)
-				var resp *http.Response
-				resp, err = http.ReadResponse(br, nil)
+				resp, err := http.ReadResponse(br, nil)
 				if err != nil {
 					conn.Close()
 					return nil, err
 				}
+				resp.Body.Close()
 
-				defer resp.Body.Close() // ปิด Body เสมอตามหลักของ Go
+				// หาก Proxy ไม่ได้ตอบ 200 OK (เช่น 407, 403, 502) ให้หยุดทันที
+				// เพื่อป้องกัน Error: http: server gave HTTP response to HTTPS client
 				if resp.StatusCode != 200 {
 					conn.Close()
-					return nil, fmt.Errorf("proxy err: %d", resp.StatusCode)
+					return nil, fmt.Errorf("Proxy rejected (Status: %d)", resp.StatusCode)
 				}
 			}
 		} else {
-			// --- โหมดป้องกัน IP จริง: ปิดการต่อตรงชั่วคราว ---
-			// หากโปรแกรมวิ่งมาถึงจุดนี้ แสดงว่าไม่มี Proxy ให้ใช้งาน
-			// เราจะสั่งให้ Error ทันทีเพื่อไม่ให้เครื่องใช้ IP จริงเชื่อมต่อไปยังเป้าหมาย
-			return nil, fmt.Errorf("SECURITY ALERT: Direct connection blocked to protect real IP")
-
-			/* หากต้องการกลับมาเปิดใช้งาน IP จริงในอนาคต ให้ลบบรรทัดบนแล้วเอาคอมเมนต์ส่วนนี้ออก:
-			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-			conn, err = dialer.DialContext(ctx, network, addr)
-			if err != nil {
-				return nil, err
-			}
-			*/
+			// --- โหมดป้องกัน IP จริง: ปิดการต่อตรง ---
+			return nil, fmt.Errorf("SECURITY ALERT: Direct connection blocked")
 		}
 
-		// ทำ uTLS Handshake ไปยังเป้าหมายสุดท้าย (Target)
+		// เมื่อผ่านด่าน Proxy มาได้แล้วค่อยทำ uTLS Handshake ไปหาเป้าหมาย
 		uTlsConfig := &utls.Config{ServerName: sni, InsecureSkipVerify: insecureTLS}
 		uconn := utls.UClient(conn, uTlsConfig, helloID)
 		if err := uconn.HandshakeContext(ctx); err != nil {
