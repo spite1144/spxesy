@@ -1489,16 +1489,14 @@ func main() {
 	}
 
 	// --- 3. ตรวจสอบ URL (จุดที่เคยเป็นบรรทัด 897) ---
-	parsedURL, err = url.Parse(finalURL) // ใช้ = แทน :=
+	parsedURL, err = url.Parse(finalURL)
 	if err != nil {
 		statusErrColor.Printf("Error: Invalid URL provided: %v\n", err)
 		return
 	}
 
-	// --- 4. จัดการ Port ---
 	if *portPtr != "" {
-		var host string
-		host, _, err = net.SplitHostPort(parsedURL.Host) // ใช้ = แทน :=
+		host, _, err = net.SplitHostPort(parsedURL.Host) // เปลี่ยนเป็น = เช่นกัน
 		if err != nil {
 			host = parsedURL.Host
 		}
