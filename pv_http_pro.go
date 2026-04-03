@@ -881,12 +881,12 @@ func main() {
 	proxyFilePtr := flag.String("p", "", "Path to proxy file (optional)")
 
 	flag.Parse()
-	var proxyList []string
 	if *proxyFilePtr != "" {
 		var err error
 		proxyList, err = loadProxies(*proxyFilePtr)
 		if err != nil {
-			statusErrColor.Fatalf("Error: Could not load proxy file: %v\n", err)
+			statusErrColor.Printf("Error: Could not load proxy file: %v\n", err)
+			os.Exit(1)
 		}
 		fmt.Printf("Successfully loaded %d proxies\n", len(proxyList))
 	}
