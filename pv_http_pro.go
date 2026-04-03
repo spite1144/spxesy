@@ -906,9 +906,9 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 				return nil, err
 			}
 
-			// --- ตรงนี้คือจุดที่เรียกใช้ "proxy" ทำให้ import ไม่หาย ---
 			if strings.HasPrefix(pURL.Scheme, "socks") {
-				dialer, err := proxy.FromURL(pURL, proxy.Direct) // เรียกใช้ proxy ที่นี่
+				// --- รองรับ SOCKS4, SOCKS5 ---
+				dialer, err := proxy.FromURL(pURL, proxy.Direct)
 				if err != nil {
 					return nil, err
 				}
@@ -917,12 +917,27 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 					return nil, err
 				}
 			} else {
-				// กรณี HTTP Proxy
+				// --- รองรับ HTTP และ HTTPS Proxy ---
 				dialer := &net.Dialer{Timeout: 15 * time.Second}
 				conn, err = dialer.DialContext(ctx, "tcp", pURL.Host)
 				if err != nil {
 					return nil, err
 				}
+
+				// หากเป็น HTTPS Proxy ให้หุ้มการเชื่อมต่อด้วย TLS ก่อนส่ง CONNECT
+				if pURL.Scheme == "https" {
+					tlsConn := tls.Client(conn, &tls.Config{
+						ServerName:         pURL.Hostname(),
+						InsecureSkipVerify: true,
+					})
+					if err := tlsConn.HandshakeContext(ctx); err != nil {
+						conn.Close()
+						return nil, err
+					}
+					conn = tlsConn
+				}
+
+				// ส่งคำสั่ง CONNECT (ใช้ได้กับทั้ง HTTP และ HTTPS Tunnel)
 				fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", addr, addr)
 				br := bufio.NewReader(conn)
 				resp, err := http.ReadResponse(br, nil)
@@ -937,13 +952,21 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 				}
 			}
 		} else {
+			// --- โหมดป้องกัน IP จริง: ปิดการต่อตรงชั่วคราว ---
+			// หากโปรแกรมวิ่งมาถึงจุดนี้ แสดงว่าไม่มี Proxy ให้ใช้งาน
+			// เราจะสั่งให้ Error ทันทีเพื่อไม่ให้เครื่องใช้ IP จริงเชื่อมต่อไปยังเป้าหมาย
+			return nil, fmt.Errorf("SECURITY ALERT: Direct connection blocked to protect real IP")
+
+			/* หากต้องการกลับมาเปิดใช้งาน IP จริงในอนาคต ให้ลบบรรทัดบนแล้วเอาคอมเมนต์ส่วนนี้ออก:
 			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
 			conn, err = dialer.DialContext(ctx, network, addr)
 			if err != nil {
 				return nil, err
 			}
+			*/
 		}
 
+		// ทำ uTLS Handshake ไปยังเป้าหมายสุดท้าย (Target)
 		uTlsConfig := &utls.Config{ServerName: sni, InsecureSkipVerify: insecureTLS}
 		uconn := utls.UClient(conn, uTlsConfig, helloID)
 		if err := uconn.HandshakeContext(ctx); err != nil {
