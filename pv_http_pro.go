@@ -894,20 +894,22 @@ func madeYouResetAttack(parentCtx context.Context, config *workerConfig, client 
 func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utls.ClientHelloID) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		var conn net.Conn
-		var err error
+		var err error // บรรทัด 897 (เก็บไว้ได้แต่ข้างล่างต้องใช้ =)
 
 		if len(proxyList) > 0 {
 			pAddr := proxyList[mathrand.Intn(len(proxyList))]
 			if !strings.Contains(pAddr, "://") {
 				pAddr = "http://" + pAddr
 			}
+
+			// แก้ไข: ใช้ pURL, err = (ไม่ใช่ :=)
 			pURL, err := url.Parse(pAddr)
 			if err != nil {
 				return nil, err
 			}
 
 			if strings.HasPrefix(pURL.Scheme, "socks") {
-				// --- รองรับ SOCKS4, SOCKS5 ---
+				// แก้ไข: ใช้ dialer, err =
 				dialer, err := proxy.FromURL(pURL, proxy.Direct)
 				if err != nil {
 					return nil, err
@@ -917,7 +919,6 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 					return nil, err
 				}
 			} else {
-				// --- รองรับ HTTP และ HTTPS Proxy ---
 				dialer := &net.Dialer{Timeout: 15 * time.Second}
 				conn, err = dialer.DialContext(ctx, "tcp", pURL.Host)
 				if err != nil {
@@ -936,34 +937,29 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 					conn = tlsConn
 				}
 
-				// ส่ง CONNECT
 				fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", addr, addr)
-
-				// --- [จุดสำคัญที่แก้] เช็คคำตอบจาก Proxy ก่อนทำ uTLS ---
 				br := bufio.NewReader(conn)
-				resp, err := http.ReadResponse(br, nil)
+
+				// แก้ไข: ใช้ resp, err = (โดยประกาศ resp ไว้ก่อน)
+				var resp *http.Response
+				resp, err = http.ReadResponse(br, nil)
 				if err != nil {
 					conn.Close()
 					return nil, err
 				}
 				resp.Body.Close()
-
-				// หาก Proxy ไม่ได้ตอบ 200 OK (เช่น 407, 403, 502) ให้หยุดทันที
-				// เพื่อป้องกัน Error: http: server gave HTTP response to HTTPS client
 				if resp.StatusCode != 200 {
 					conn.Close()
-					return nil, fmt.Errorf("Proxy rejected (Status: %d)", resp.StatusCode)
+					return nil, fmt.Errorf("proxy err: %d", resp.StatusCode)
 				}
 			}
 		} else {
-			// --- โหมดป้องกัน IP จริง: ปิดการต่อตรง ---
 			return nil, fmt.Errorf("SECURITY ALERT: Direct connection blocked")
 		}
 
-		// เมื่อผ่านด่าน Proxy มาได้แล้วค่อยทำ uTLS Handshake ไปหาเป้าหมาย
 		uTlsConfig := &utls.Config{ServerName: sni, InsecureSkipVerify: insecureTLS}
 		uconn := utls.UClient(conn, uTlsConfig, helloID)
-		if err := uconn.HandshakeContext(ctx); err != nil {
+		if err = uconn.HandshakeContext(ctx); err != nil { // ใช้ =
 			conn.Close()
 			return nil, err
 		}
