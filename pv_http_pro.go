@@ -1001,12 +1001,13 @@ func worker(ctx context.Context, wg *sync.WaitGroup, config *workerConfig, httpV
 
 	var client *http.Client
 	var burstsSinceLastCycle int
-	const clientCycleThreshold = 50 selectedUA := getRandomElement(userAgents)
+	const clientCycleThreshold = 50
+	selectedUA := getRandomElement(userAgents)
 
 	if httpVersion == "3" {
-    client = buildHTTP3Client(config)
+		client = buildHTTP3Client(config)
 	} else {
-    client = buildHTTPClient(config, httpVersion, selectedUA) // ส่ง UA เข้าไป
+		client = buildHTTPClient(config, httpVersion, selectedUA) // ส่ง UA เข้าไป
 	}
 
 	if httpVersion == "2" {
@@ -1071,7 +1072,7 @@ func worker(ctx context.Context, wg *sync.WaitGroup, config *workerConfig, httpV
 				}
 
 				headerSet := map[string]string{
-					randomHeaderName("User-Agent"): selectedUA,
+					randomHeaderName("User-Agent"):      selectedUA,
 					randomHeaderName("Accept-Language"): getRandomElement(languages),
 					randomHeaderName("Referer"):         getRandomElement(referers),
 					randomHeaderName("Accept"):          getRandomElement(accepts),
