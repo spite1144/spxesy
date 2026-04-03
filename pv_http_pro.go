@@ -1035,7 +1035,7 @@ func worker(ctx context.Context, wg *sync.WaitGroup, config *workerConfig, httpV
 			if httpVersion == "3" {
 				client = buildHTTP3Client(config)
 			} else {
-				client = buildHTTPClient(config, httpVersion)
+				client = buildHTTPClient(config, httpVersion, selectedUA)
 			}
 			burstsSinceLastCycle = 0
 			logMessage(fmt.Sprintf("[H%s] Client cycled (new JA3/H2 fingerprint)", httpVersion))
