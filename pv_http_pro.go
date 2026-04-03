@@ -25,6 +25,7 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
+	"golang.org/x/net/proxy"
 )
 
 const (
@@ -894,25 +895,46 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		var conn net.Conn
 		var err error
+
 		if len(proxyList) > 0 {
 			pAddr := proxyList[mathrand.Intn(len(proxyList))]
-			pURL, _ := url.Parse(pAddr)
-			dialer := &net.Dialer{Timeout: 15 * time.Second}
-			conn, err = dialer.DialContext(ctx, "tcp", pURL.Host)
+			if !strings.Contains(pAddr, "://") {
+				pAddr = "http://" + pAddr
+			}
+			pURL, err := url.Parse(pAddr)
 			if err != nil {
 				return nil, err
 			}
-			fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", addr, addr)
-			br := bufio.NewReader(conn)
-			resp, err := http.ReadResponse(br, nil)
-			if err != nil {
-				conn.Close()
-				return nil, err
-			}
-			resp.Body.Close()
-			if resp.StatusCode != 200 {
-				conn.Close()
-				return nil, fmt.Errorf("proxy err: %d", resp.StatusCode)
+
+			// --- ตรงนี้คือจุดที่เรียกใช้ "proxy" ทำให้ import ไม่หาย ---
+			if strings.HasPrefix(pURL.Scheme, "socks") {
+				dialer, err := proxy.FromURL(pURL, proxy.Direct) // เรียกใช้ proxy ที่นี่
+				if err != nil {
+					return nil, err
+				}
+				conn, err = dialer.Dial("tcp", addr)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				// กรณี HTTP Proxy
+				dialer := &net.Dialer{Timeout: 15 * time.Second}
+				conn, err = dialer.DialContext(ctx, "tcp", pURL.Host)
+				if err != nil {
+					return nil, err
+				}
+				fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", addr, addr)
+				br := bufio.NewReader(conn)
+				resp, err := http.ReadResponse(br, nil)
+				if err != nil {
+					conn.Close()
+					return nil, err
+				}
+				resp.Body.Close()
+				if resp.StatusCode != 200 {
+					conn.Close()
+					return nil, fmt.Errorf("proxy err: %d", resp.StatusCode)
+				}
 			}
 		} else {
 			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
@@ -921,8 +943,9 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 				return nil, err
 			}
 		}
+
 		uTlsConfig := &utls.Config{ServerName: sni, InsecureSkipVerify: insecureTLS}
-		uconn := utls.UClient(conn, uTlsConfig, helloID) // ใช้ ID ที่ส่งมา
+		uconn := utls.UClient(conn, uTlsConfig, helloID)
 		if err := uconn.HandshakeContext(ctx); err != nil {
 			conn.Close()
 			return nil, err
