@@ -50,6 +50,7 @@ var (
 var (
 	userAgents = []string{
 		// ======================== CHROME 2025-2026 ========================
+		// ======================== CHROME 2025-2026 ========================
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
@@ -1454,6 +1455,7 @@ func main() {
 	proxyFilePtr := flag.String("p", "", "Path to proxy file (optional)")
 
 	flag.Parse()
+	var proxyList []string
 	if *proxyFilePtr != "" {
 		var err error
 		proxyList, err = loadProxies(*proxyFilePtr)
