@@ -1048,12 +1048,15 @@ func worker(ctx context.Context, wg *sync.WaitGroup, config *workerConfig, httpV
 	var client *http.Client
 	var burstsSinceLastCycle int
 	const clientCycleThreshold = 50
+
+	// 1. สุ่มชื่อ UA ไว้ที่นี่
 	selectedUA := getRandomElement(userAgents)
 
 	if httpVersion == "3" {
 		client = buildHTTP3Client(config)
 	} else {
-		client = buildHTTPClient(config, httpVersion, selectedUA) // ส่ง UA เข้าไป
+		// 2. ส่ง selectedUA เข้าไปให้ครบ 3 ค่า
+		client = buildHTTPClient(config, httpVersion, selectedUA)
 	}
 
 	if httpVersion == "2" {
@@ -1496,7 +1499,7 @@ func main() {
 	}
 
 	if *portPtr != "" {
-		host, _, err = net.SplitHostPort(parsedURL.Host) // เปลี่ยนเป็น = เช่นกัน
+		host, _, err := net.SplitHostPort(parsedURL.Host)
 		if err != nil {
 			host = parsedURL.Host
 		}
