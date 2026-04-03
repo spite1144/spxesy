@@ -1460,9 +1460,14 @@ func main() {
 	proxyFilePtr := flag.String("p", "", "Path to proxy file (optional)")
 
 	flag.Parse()
+
+	// --- 1. ประกาศตัวแปรที่จำเป็นไว้ที่นี่ที่เดียว ---
+	var err error
 	var proxyList []string
+	var parsedURL *url.URL
+
+	// --- 2. จัดการ Proxy ---
 	if *proxyFilePtr != "" {
-		var err error
 		proxyList, err = loadProxies(*proxyFilePtr)
 		if err != nil {
 			statusErrColor.Printf("Error: Could not load proxy file: %v\n", err)
@@ -1470,24 +1475,30 @@ func main() {
 		}
 		fmt.Printf("Successfully loaded %d proxies\n", len(proxyList))
 	}
+
 	if *urlPtr == "" {
 		fmt.Println()
 		statusErrColor.Println("Error: --url is required.")
 		flag.Usage()
 		return
 	}
+
 	finalURL := *urlPtr
 	if !strings.HasPrefix(finalURL, "http") {
 		finalURL = "https://" + finalURL
 	}
 
-	parsedURL, err := url.Parse(finalURL)
+	// --- 3. ตรวจสอบ URL (จุดที่เคยเป็นบรรทัด 897) ---
+	parsedURL, err = url.Parse(finalURL) // ใช้ = แทน :=
 	if err != nil {
 		statusErrColor.Printf("Error: Invalid URL provided: %v\n", err)
 		return
 	}
+
+	// --- 4. จัดการ Port ---
 	if *portPtr != "" {
-		host, _, err := net.SplitHostPort(parsedURL.Host)
+		var host string
+		host, _, err = net.SplitHostPort(parsedURL.Host) // ใช้ = แทน :=
 		if err != nil {
 			host = parsedURL.Host
 		}
