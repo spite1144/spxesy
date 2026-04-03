@@ -911,14 +911,14 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 				if err != nil {
 					return nil, err
 				}
-				conn, err := dialer.Dial("tcp", addr)
+				conn, err = dialer.Dial("tcp", addr)
 				if err != nil {
 					return nil, err
 				}
 			} else {
 				// --- รองรับ HTTP และ HTTPS Proxy ---
 				dialer := &net.Dialer{Timeout: 15 * time.Second}
-				conn, err := dialer.DialContext(ctx, "tcp", pURL.Host)
+				conn, err = dialer.DialContext(ctx, "tcp", pURL.Host)
 				if err != nil {
 					return nil, err
 				}
@@ -938,13 +938,16 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 
 				// ส่งคำสั่ง CONNECT (ใช้ได้กับทั้ง HTTP และ HTTPS Tunnel)
 				fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", addr, addr)
+
 				br := bufio.NewReader(conn)
-				resp, err := http.ReadResponse(br, nil)
+				var resp *http.Response
+				resp, err = http.ReadResponse(br, nil)
 				if err != nil {
 					conn.Close()
 					return nil, err
 				}
-				resp.Body.Close()
+
+				defer resp.Body.Close() // ปิด Body เสมอตามหลักของ Go
 				if resp.StatusCode != 200 {
 					conn.Close()
 					return nil, fmt.Errorf("proxy err: %d", resp.StatusCode)
@@ -958,7 +961,7 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 
 			/* หากต้องการกลับมาเปิดใช้งาน IP จริงในอนาคต ให้ลบบรรทัดบนแล้วเอาคอมเมนต์ส่วนนี้ออก:
 			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-			conn, err := dialer.DialContext(ctx, network, addr)
+			conn, err = dialer.DialContext(ctx, network, addr)
 			if err != nil {
 				return nil, err
 			}
